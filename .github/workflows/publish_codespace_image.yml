@@ -20,6 +20,7 @@ jobs:
     - name: Build the Codespace Base Image
       uses: docker/build-push-action@v6
       with:
+        password: ${{ secrets.GH_TOKEN }}
         push: true
         run: |
           docker-compose -f 
