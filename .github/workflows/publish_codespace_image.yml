@@ -18,7 +18,10 @@ jobs:
         password: ${{ secrets.GH_TOKEN }}
 
     - name: Build the Codespace Base Image
-      run: |
-        docker-compose -f .devcontainer/docker-compose.yml build base
-        docker tag base:latest ghcr.io/sidneibrianti/chatwoot_codespace:latest
-        docker push ghcr.io/sidneibrianti/chatwoot_codespace:latest
+      uses: docker/build-push-action@v6
+      with:
+        push: true
+        run: |
+          docker-compose -f 
+          docker tag base:latest ghcr.io/sidneibrianti/chatwoot_codespace:latest
+          docker push ghcr.io/sidneibrianti/chatwoot_codespace:latest
