@@ -1,5 +1,6 @@
 <%# Runs before first paint on every super admin page, and again when the system theme changes. %>
 <script>
+  window.globalConfig = <%= raw json_escape(GlobalConfig.get('BRAND_PRIMARY_COLOR').to_json) %>;
   (function () {
     var systemDark = window.matchMedia('(prefers-color-scheme: dark)');
     var apply = function () {
@@ -10,3 +11,4 @@
     systemDark.addEventListener('change', apply);
   })();
 </script>
+<%= vite_javascript_tag 'brand' %>

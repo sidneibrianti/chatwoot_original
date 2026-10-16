@@ -36,6 +36,8 @@ class InstallationConfig < ApplicationRecord
 
   before_validation :set_lock
   validates :name, presence: true
+  validates :value, format: { with: /\A#[0-9a-fA-F]{6}\z/, message: 'must be a hex color in #RRGGBB format' },
+                    allow_blank: true, if: -> { name == 'BRAND_PRIMARY_COLOR' }
   validate :saml_sso_users_check, if: -> { name == 'ENABLE_SAML_SSO_LOGIN' }
 
   # TODO: Get rid of default scope

@@ -12,21 +12,27 @@ const {
   violet,
   violetDark,
 } = require('@radix-ui/colors');
+const { parseToRgba } = require('color2k');
+
+const brandColor = (token, fallback) => {
+  const channels = parseToRgba(fallback).slice(0, 3).map(Math.round).join(' ');
+  return `rgb(var(--${token}, ${channels}) / <alpha-value>)`;
+};
 
 export const colors = {
   woot: {
-    25: blue.blue2,
-    50: blue.blue3,
-    75: blue.blue4,
-    100: blue.blue5,
-    200: blue.blue7,
-    300: blue.blue8,
-    400: blueDark.blue11,
-    500: blueDark.blue10,
-    600: blueDark.blue9,
-    700: blueDark.blue8,
-    800: blueDark.blue6,
-    900: blueDark.blue2,
+    25: brandColor('woot-25', blue.blue2),
+    50: brandColor('woot-50', blue.blue3),
+    75: brandColor('woot-75', blue.blue4),
+    100: brandColor('woot-100', blue.blue5),
+    200: brandColor('woot-200', blue.blue7),
+    300: brandColor('woot-300', blue.blue8),
+    400: brandColor('woot-400', blueDark.blue11),
+    500: brandColor('woot-500', blueDark.blue10),
+    600: brandColor('woot-600', blueDark.blue9),
+    700: brandColor('woot-700', blueDark.blue8),
+    800: brandColor('woot-800', blueDark.blue6),
+    900: brandColor('woot-900', blueDark.blue2),
   },
   green: {
     50: greenDark.green12,
@@ -226,7 +232,7 @@ export const colors = {
     },
 
     black: '#000000',
-    brand: '#2781F6',
+    brand: 'rgb(var(--brand-color, 39 129 246) / <alpha-value>)',
     portal: 'var(--dynamic-portal-color)',
     'portal-soft': 'var(--dynamic-portal-color-soft)',
     'portal-faint': 'var(--dynamic-portal-color-faint)',

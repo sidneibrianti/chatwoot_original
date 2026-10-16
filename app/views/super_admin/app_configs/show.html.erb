@@ -24,6 +24,8 @@
                               [["True", true], ["False", false]],
                               { selected: ActiveModel::Type::Boolean.new.cast(@app_config[key]) },
                               id: field_id, class: ui(:select) %>
+            <% elsif config['type'] == 'color' %>
+              <%= form.color_field "app_config[#{key}]", value: @app_config[key].presence || config['value'], id: field_id, class: ui(:input, "h-10 cursor-pointer") %>
             <% elsif config['type'] == 'code' %>
               <%= form.text_area "app_config[#{key}]",
                                  value: @app_config[key],
