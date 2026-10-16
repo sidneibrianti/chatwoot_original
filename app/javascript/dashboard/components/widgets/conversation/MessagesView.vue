@@ -15,7 +15,8 @@ import {
   useSessionStorage,
 } from '@vueuse/core';
 // composable
-import { useTrack } from 'dashboard/composables';
+import { useAlert, useTrack } from 'dashboard/composables';
+import { useMessageNavigation } from 'dashboard/composables/useMessageNavigation';
 import { useCampaignHistory } from 'dashboard/composables/useCampaignHistory';
 import { useKeyboardEvents } from 'dashboard/composables/useKeyboardEvents';
 import { useSnakeCase } from 'dashboard/composables/useTransformKeys';
@@ -165,6 +166,7 @@ export default {
     });
 
     return {
+      ...useMessageNavigation(),
       ...useCampaignHistory(),
       olderConversation,
       newerConversation,
@@ -191,10 +193,12 @@ export default {
   data() {
     return {
       isLoadingPrevious: true,
-      heightBeforeLoad: null,
       conversationPanel: null,
       hasUserScrolled: false,
       isProgrammaticScroll: false,
+      isLoadingContext: false,
+      isLoadingNewer: false,
+      loadingContextKey: null,
     };
   },
 
@@ -242,13 +246,17 @@ export default {
     },
     readMessages() {
       return getReadMessages(
-        this.getMessages,
+        this.getMessages.filter(
+          message => message.conversation_id === this.currentChat.id
+        ),
         this.currentChat.agent_last_seen_at
       );
     },
     unReadMessages() {
       return getUnreadMessages(
-        this.getMessages,
+        this.getMessages.filter(
+          message => message.conversation_id === this.currentChat.id
+        ),
         this.currentChat.agent_last_seen_at
       );
     },
@@ -256,7 +264,8 @@ export default {
       return (
         (this.currentChat && this.currentChat.dataFetched === undefined) ||
         (!this.listLoadingStatus && this.isLoadingPrevious) ||
-        !this.isCampaignHistoryReady
+        !this.isCampaignHistoryReady ||
+        this.isLoadingContext
       );
     },
     timelineMessages() {
@@ -359,6 +368,14 @@ export default {
   },
 
   watch: {
+    '$route.query.messageId'(messageId) {
+      if (
+        messageId &&
+        Number(this.$route.params.conversation_id) === this.currentChat.id
+      ) {
+        this.onScrollToMessage({ messageId, forceLoad: true });
+      }
+    },
     isCampaignHistoryReady(ready) {
       if (!ready) return;
       this.onScrollToMessage({ messageId: this.$route.query.messageId });
@@ -383,6 +400,9 @@ export default {
       if (newChat.id === oldChat.id) {
         return;
       }
+      this.hasUserScrolled = false;
+      this.isLoadingPrevious = false;
+      this.isLoadingNewer = false;
       this.fetchAllAttachmentsFromCurrentChat();
       this.resetReplyEditorHeight();
     },
@@ -416,6 +436,12 @@ export default {
   },
 
   methods: {
+    isCurrentTimeline(conversationId, accountId) {
+      return (
+        this.currentChat.id === conversationId &&
+        this.$route.params.accountId === accountId
+      );
+    },
     fetchAllAttachmentsFromCurrentChat() {
       this.$store.dispatch('fetchAllAttachments', this.currentChat.id);
     },
@@ -425,13 +451,47 @@ export default {
       emitter.off(BUS_EVENTS.INSERT_INTO_RICH_EDITOR, this.showReplyBox);
       emitter.off(CMD_AI_ASSIST, this.showReplyBox);
     },
-    onScrollToMessage({ messageId = '' } = {}) {
+    async onScrollToMessage({ messageId = '', forceLoad = false } = {}) {
+      const conversationId = this.currentChat.id;
+      const accountId = this.$route.params.accountId;
+      const routeTarget = this.$route.query.messageId;
+      const key = `${accountId}-${conversationId}-${messageId}`;
+      if (
+        messageId &&
+        !this.currentChat.messages?.some(
+          message => message.id === Number(messageId)
+        )
+      ) {
+        if (this.loadingContextKey === key) return;
+        if (!this.currentChat.dataFetched && !forceLoad) return;
+        this.loadingContextKey = key;
+        this.isLoadingContext = true;
+        try {
+          await this.$store.dispatch('loadMessageContext', {
+            conversationId,
+            messageId: Number(messageId),
+          });
+        } catch (error) {
+          useAlert(this.$t('CONVERSATION.HISTORY.CONTEXT_ERROR'));
+          return;
+        } finally {
+          if (this.loadingContextKey === key) {
+            this.isLoadingContext = false;
+            this.loadingContextKey = null;
+          }
+        }
+        if (
+          !this.isCurrentTimeline(conversationId, accountId) ||
+          this.$route.query.messageId !== routeTarget
+        )
+          return;
+      }
       this.$nextTick(() => {
+        if (!this.isCurrentTimeline(conversationId, accountId)) return;
         const messageElement = document.getElementById('message' + messageId);
         if (messageElement) {
           this.isProgrammaticScroll = true;
           messageElement.scrollIntoView({ behavior: 'smooth' });
-          this.fetchPreviousMessages();
         } else {
           this.scrollToBottom();
         }
@@ -440,7 +500,6 @@ export default {
     },
     addScrollListener() {
       this.conversationPanel = this.$el.querySelector('.conversation-panel');
-      this.setScrollParams();
       this.conversationPanel.addEventListener('scroll', this.handleScroll);
       this.$nextTick(() => this.scrollToBottom());
       this.isLoadingPrevious = false;
@@ -470,13 +529,10 @@ export default {
         getTimelineEntries(this.conversationPanel).slice(-1)
       );
     },
-    setScrollParams() {
-      this.heightBeforeLoad = this.conversationPanel.scrollHeight;
-      this.scrollTopBeforeLoad = this.conversationPanel.scrollTop;
-    },
-
     async fetchPreviousMessages(scrollTop = 0) {
-      this.setScrollParams();
+      if (this.isLoadingContext) return;
+      const conversationId = this.currentChat.id;
+      const accountId = this.$route.params.accountId;
       const shouldLoadMoreMessages =
         this.currentChat.dataFetched === true &&
         !this.listLoadingStatus &&
@@ -487,21 +543,25 @@ export default {
         !this.isLoadingPrevious &&
         shouldLoadMoreMessages
       ) {
+        const restoreAnchor = captureTimelineAnchor(this.conversationPanel);
         this.isLoadingPrevious = true;
         try {
           await this.$store.dispatch('fetchPreviousMessages', {
-            conversationId: this.currentChat.id,
-            before: this.currentChat.messages[0].id,
+            conversationId,
+            before: this.currentChat.messages.find(
+              message => typeof message.id === 'number'
+            )?.id,
           });
-          const heightDifference =
-            this.conversationPanel.scrollHeight - this.heightBeforeLoad;
-          this.conversationPanel.scrollTop =
-            this.scrollTopBeforeLoad + heightDifference;
-          this.setScrollParams();
+          if (this.currentChat.id !== conversationId) return;
+          this.$nextTick(() => {
+            if (this.isCurrentTimeline(conversationId, accountId))
+              restoreAnchor();
+          });
         } catch (error) {
           // Ignore Error
         } finally {
-          this.isLoadingPrevious = false;
+          if (this.isCurrentTimeline(conversationId, accountId))
+            this.isLoadingPrevious = false;
         }
       }
     },
@@ -523,8 +583,36 @@ export default {
     },
     async handleMessageRetry(message) {
       if (!message) return;
+      if (message.conversationId !== this.currentChat.id) {
+        this.openMessage(message);
+        return;
+      }
       const payload = useSnakeCase(message);
       await this.$store.dispatch('sendMessageWithData', payload);
+    },
+    async loadNewerMessages() {
+      const conversationId = this.currentChat.id;
+      const accountId = this.$route.params.accountId;
+      const restoreAnchor = captureTimelineAnchor(this.conversationPanel);
+      this.isLoadingNewer = true;
+      try {
+        await this.$store.dispatch('fetchPreviousMessages', {
+          conversationId,
+          after: [...this.currentChat.messages]
+            .reverse()
+            .find(message => typeof message.id === 'number')?.id,
+          includeContactConversations: false,
+        });
+        this.$nextTick(() => {
+          if (this.isCurrentTimeline(conversationId, accountId))
+            restoreAnchor();
+        });
+      } catch (error) {
+        useAlert(this.$t('CONVERSATION.HISTORY.CONTEXT_ERROR'));
+      } finally {
+        if (this.isCurrentTimeline(conversationId, accountId))
+          this.isLoadingNewer = false;
+      }
     },
     toggleReplyEditorSize() {
       this.resizableEditorWrapperRef?.toggleEditorExpand?.();
@@ -542,6 +630,12 @@ export default {
     class="flex flex-col justify-between flex-grow h-full min-w-0 m-0"
   >
     <div ref="topBannerRef">
+      <p
+        v-if="currentChat.aggregatedHistory"
+        class="text-xs text-n-slate-11 text-center px-4 py-2 m-0 border-b border-n-weak"
+      >
+        {{ $t('CONVERSATION.HISTORY.REPLY_CONTEXT', { id: currentChat.id }) }}
+      </p>
       <Banner
         v-if="isInstagramRestrictionBannerVisible"
         color-scheme="warning"
@@ -574,6 +668,7 @@ export default {
       :is-an-email-channel="isAnEmailChannel"
       :inbox-supports-reply-to="inboxSupportsReplyTo"
       :messages="timelineMessages"
+      :aggregated-history="!!currentChat.aggregatedHistory"
       :campaign-history="visibleCampaignHistory"
       @retry="handleMessageRetry"
     >
@@ -621,6 +716,18 @@ export default {
         </li>
       </template>
       <template #after>
+        <li
+          v-if="currentChat.hasMoreMessagesAfter"
+          class="flex justify-center py-3"
+        >
+          <NextButton
+            ghost
+            sm
+            :disabled="isLoadingNewer"
+            :label="$t('CONVERSATION.HISTORY.LOAD_NEWER')"
+            @click="loadNewerMessages"
+          />
+        </li>
         <ContactConversationLink
           v-if="newerConversation"
           direction="newer"

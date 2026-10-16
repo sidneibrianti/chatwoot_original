@@ -1,18 +1,33 @@
 class MessageFinder
   MESSAGE_ID_MAX = 2_147_483_647
 
-  def initialize(conversation, params)
+  attr_reader :pagination
+
+  def initialize(conversation, params, authorized_conversations: nil)
     @conversation = conversation
     @params = params
+    @authorized_conversations = authorized_conversations
   end
 
   def perform
+    if @authorized_conversations
+      finder = ConversationHistoryFinder.new(messages, @params)
+      result = finder.perform
+      @pagination = finder.pagination
+      return result
+    end
+
     current_messages
   end
 
   private
 
   def conversation_messages
+    if @authorized_conversations
+      return @conversation.account.messages.where(conversation_id: @authorized_conversations.select(:id))
+                          .includes(:conversation, :sender, attachments: { file_attachment: :blob }, sender: { avatar_attachment: [:blob] })
+    end
+
     @conversation.messages.includes(:attachments, :sender, sender: { avatar_attachment: [:blob] })
   end
 

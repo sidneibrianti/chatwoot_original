@@ -189,6 +189,8 @@ Rails.application.routes.draw do
               post :filter
             end
             scope module: :conversations do
+              resources :message_search, only: [:index]
+              resources :message_context, only: [:show]
               resources :campaign_history, only: [:index] if ChatwootApp.enterprise?
               resources :messages, only: [:index, :create, :destroy, :update] do
                 member do

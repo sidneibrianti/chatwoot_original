@@ -1,5 +1,21 @@
 import { CONVERSATION_PRIORITY_ORDER } from 'shared/constants/messages';
 
+export const compareMessages = (a, b) =>
+  (a.chronological_created_at ?? a.created_at) -
+    (b.chronological_created_at ?? b.created_at) ||
+  (typeof a.id === 'number' && typeof b.id === 'number' ? a.id - b.id : 0);
+
+export const mergeMessages = (existing, incoming) => {
+  const messages = new Map();
+  [...existing, ...incoming].forEach(message => {
+    const previous = messages.get(message.id);
+    if (previous?.chronological_updated_at > message.chronological_updated_at)
+      return;
+    messages.set(message.id, message);
+  });
+  return [...messages.values()].sort(compareMessages);
+};
+
 export const findPendingMessageIndex = (chat, message) => {
   const { echo_id: tempMessageId } = message;
   return chat.messages.findIndex(

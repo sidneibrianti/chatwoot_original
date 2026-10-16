@@ -17,6 +17,8 @@ import messageReadActions from './actions/messageReadActions';
 import messageTranslateActions from './actions/messageTranslateActions';
 import * as Sentry from '@sentry/vue';
 import { useAbortableRequest } from 'dashboard/composables/useAbortableRequest';
+import { FEATURE_FLAGS } from 'dashboard/featureFlags';
+import { mergeMessages } from './helpers';
 import {
   handleVoiceCallCreated,
   handleVoiceCallUpdated,
@@ -27,6 +29,23 @@ import {
 const MESSAGES_PER_PAGE = 20;
 
 const pendingHistoryRequests = new Map();
+const contextRequest = useAbortableRequest();
+
+const isMessageRequestCurrent = (
+  state,
+  conversationId,
+  version,
+  accountUrl
+) => {
+  const conversation = state.allConversations.find(
+    c => c.id === conversationId
+  );
+  return (
+    conversation &&
+    (conversation.messageWindowVersion ?? 0) === version &&
+    accountUrl === MessageApi.url
+  );
+};
 
 const TERMINAL_CONTACT_INFO_REQUEST_STATES = ['shared', 'identity_conflict'];
 
@@ -169,39 +188,105 @@ const actions = {
     commit(types.CLEAR_CURRENT_CHAT_WINDOW);
   },
 
-  fetchPreviousMessages: ({ commit }, data) => {
+  fetchPreviousMessages: ({ commit, state }, data) => {
+    const accountUrl = MessageApi.url;
+    const chat = state.allConversations.find(c => c.id === data.conversationId);
+    const version = chat?.messageWindowVersion ?? 0;
+    const requestData = {
+      ...data,
+      includeContactConversations:
+        data.includeContactConversations ?? !chat?.contextMode,
+    };
     const requestKey = JSON.stringify([
       MessageApi.url,
       data.conversationId,
       data.before,
       data.after,
+      requestData.includeContactConversations,
+      version,
     ]);
     if (pendingHistoryRequests.has(requestKey)) {
       return pendingHistoryRequests.get(requestKey);
     }
 
-    const request = MessageApi.getPreviousMessages(data)
+    const request = MessageApi.getPreviousMessages(requestData)
       .then(({ data: { meta, payload } }) => {
+        if (
+          !isMessageRequestCurrent(
+            state,
+            data.conversationId,
+            version,
+            accountUrl
+          )
+        )
+          return false;
         commit(`conversationMetadata/${types.SET_CONVERSATION_METADATA}`, {
           id: data.conversationId,
           data: meta,
         });
-        commit(types.SET_PREVIOUS_CONVERSATIONS, {
-          id: data.conversationId,
-          data: payload,
-        });
+        commit(
+          data.replace ? 'setMessageWindow' : types.SET_PREVIOUS_CONVERSATIONS,
+          {
+            id: data.conversationId,
+            data: payload,
+            keepNewer: true,
+          }
+        );
         // A short backward page means the start is reached; `after` requests only prove it when empty.
-        const hasReachedFirstMessage = data.after
+        let hasReachedFirstMessage = data.after
           ? !payload.length
           : payload.length < MESSAGES_PER_PAGE;
+        if (meta.pagination) {
+          hasReachedFirstMessage =
+            meta.pagination.direction === 'before' && !meta.pagination.has_more;
+        }
+        if (meta.pagination) {
+          commit('setMessageHistoryState', {
+            id: data.conversationId,
+            aggregatedHistory: meta.aggregated_history,
+            ...(data.after
+              ? { hasMoreMessagesAfter: meta.pagination.has_more }
+              : {}),
+          });
+        }
         if (hasReachedFirstMessage) {
           commit(types.SET_ALL_MESSAGES_LOADED, data.conversationId);
         }
+        return true;
       })
       .finally(() => pendingHistoryRequests.delete(requestKey));
 
     pendingHistoryRequests.set(requestKey, request);
     return request;
+  },
+
+  loadMessageContext: ({ commit, state }, { conversationId, messageId }) => {
+    commit('invalidateMessageRequests', conversationId);
+    const chat = state.allConversations.find(c => c.id === conversationId);
+    const version = chat?.messageWindowVersion ?? 0;
+    const accountUrl = MessageApi.url;
+    return contextRequest.run(async signal => {
+      const { data } = await MessageApi.context(conversationId, messageId, {
+        signal,
+      });
+      if (
+        signal.aborted ||
+        !isMessageRequestCurrent(state, conversationId, version, accountUrl)
+      )
+        return;
+      commit('setMessageWindow', {
+        id: conversationId,
+        data: data.payload.messages,
+      });
+      commit('setMessageHistoryState', {
+        id: conversationId,
+        contextMode: true,
+        aggregatedHistory: false,
+        dataFetched: true,
+        allMessagesLoaded: !data.meta.has_more_before,
+        hasMoreMessagesAfter: data.meta.has_more_after,
+      });
+    });
   },
 
   fetchAllAttachments: async ({ commit }, conversationId) => {
@@ -235,33 +320,36 @@ const actions = {
     const selectedChat = allConversations.find(
       conversation => conversation.id === conversationId
     );
-    if (!selectedChat) return;
+    if (!selectedChat || selectedChat.hasMoreMessagesAfter) return;
+    const version = selectedChat.messageWindowVersion ?? 0;
+    const accountUrl = MessageApi.url;
     try {
-      const { messages } = selectedChat;
-      // Fetch all the messages after the last message id
-      const {
-        data: { meta, payload },
-      } = await MessageApi.getPreviousMessages({
-        conversationId,
-        after: lastMessageId,
-      });
-      commit(`conversationMetadata/${types.SET_CONVERSATION_METADATA}`, {
-        id: conversationId,
-        data: meta,
-      });
-      // Find the messages that are not already present in the store
-      const missingMessages = payload.filter(
-        message => !messages.find(item => item.id === message.id)
-      );
-      selectedChat.messages.push(...missingMessages);
-      // Sort the messages by created_at
-      const sortedMessages = selectedChat.messages.sort((a, b) => {
-        return new Date(a.created_at) - new Date(b.created_at);
-      });
-      commit(types.SET_MISSING_MESSAGES, {
-        id: conversationId,
-        data: sortedMessages,
-      });
+      let cursor = lastMessageId;
+      let hasMore;
+      do {
+        // Each page needs the cursor returned by the previous request.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await MessageApi.getPreviousMessages({
+          conversationId,
+          after: cursor,
+          includeContactConversations: !selectedChat.contextMode,
+        });
+        const { meta, payload } = response.data;
+        if (
+          !isMessageRequestCurrent(state, conversationId, version, accountUrl)
+        )
+          return;
+        commit(`conversationMetadata/${types.SET_CONVERSATION_METADATA}`, {
+          id: conversationId,
+          data: meta,
+        });
+        commit(types.SET_MISSING_MESSAGES, {
+          id: conversationId,
+          data: mergeMessages(payload, selectedChat.messages),
+        });
+        hasMore = meta.pagination?.has_more && payload.length > 0;
+        cursor = meta.pagination?.after;
+      } while (hasMore);
       commit(types.SET_LAST_MESSAGE_ID_IN_SYNC_CONVERSATION, {
         conversationId,
         messageId: null,
@@ -282,7 +370,9 @@ const actions = {
     );
     if (!selectedChat) return;
     const { messages } = selectedChat;
-    const lastMessage = messages.last();
+    const lastMessage = [...messages]
+      .reverse()
+      .find(message => typeof message.id === 'number');
     if (!lastMessage) return;
     commit(types.SET_LAST_MESSAGE_ID_IN_SYNC_CONVERSATION, {
       conversationId,
@@ -290,18 +380,36 @@ const actions = {
     });
   },
 
-  async setActiveChat({ commit, dispatch }, { data, after }) {
+  async setActiveChat({ commit, dispatch, rootGetters }, { data, after }) {
     commit(types.SET_CURRENT_CHAT_WINDOW, data);
+    const featureEnabled = rootGetters?.['accounts/isFeatureEnabledonAccount'];
+    const historyEnabled = featureEnabled?.(
+      rootGetters.getCurrentAccountId,
+      FEATURE_FLAGS.CONVERSATION_HISTORY
+    );
+    if (after && historyEnabled) {
+      try {
+        await dispatch('loadMessageContext', {
+          conversationId: data.id,
+          messageId: Number(after),
+        });
+        return;
+      } catch (error) {
+        // The timeline reports context errors when the target is unavailable.
+      }
+    }
     if (data.dataFetched === undefined) {
       // Reset only when refetching — a re-activated short conversation has no scroll to earn it back.
       commit(types.CLEAR_ALL_MESSAGES_LOADED, data.id);
       try {
-        await dispatch('fetchPreviousMessages', {
-          after,
+        const applied = await dispatch('fetchPreviousMessages', {
+          after: historyEnabled ? undefined : after,
           // A conversation created without an initial message has nothing to anchor on.
-          before: data.messages[0]?.id,
+          before: historyEnabled ? undefined : data.messages[0]?.id,
           conversationId: data.id,
+          ...(historyEnabled ? { replace: true } : {}),
         });
+        if (applied === false) return;
         commit(types.SET_CHAT_DATA_FETCHED, data.id);
       } catch (error) {
         // Ignore error

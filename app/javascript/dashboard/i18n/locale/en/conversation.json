@@ -1,5 +1,28 @@
 {
   "CONVERSATION": {
+    "HISTORY": {
+      "SEPARATOR": "Conversation #{id} — {timestamp}",
+      "OPEN_CONVERSATION": "Open this conversation",
+      "REPLY_CONTEXT": "Replies will be sent in conversation #{id}. Open a historical conversation to reply there.",
+      "SEARCH_SCOPE": "Search this contact's messages across all inboxes you can access. The timeline combines conversations in the current inbox only.",
+      "CLOSE": "Close search",
+      "DATE_FROM": "From",
+      "DATE_TO": "To",
+      "MESSAGE_TYPE": "Message type",
+      "ALL_TYPES": "All message types",
+      "INCOMING": "Incoming",
+      "OUTGOING": "Outgoing",
+      "ACTIVITY": "Activity",
+      "TEMPLATE": "Template",
+      "INCLUDE_PRIVATE": "Include private notes",
+      "RESULT_COUNT": "{count} results",
+      "PREVIOUS_RESULT": "Previous result",
+      "NEXT_RESULT": "Next result",
+      "SEARCH_ERROR": "Unable to search messages. Check the filters and try again.",
+      "CONTEXT_ERROR": "Unable to load this message's context.",
+      "LOAD_MORE": "Load more results",
+      "LOAD_NEWER": "Load newer messages"
+    },
     "REFERRAL": {
       "AD_LABEL": "Ad",
       "POST_LABEL": "Post",

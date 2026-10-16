@@ -1,7 +1,9 @@
 <script setup>
-import { computed, reactive } from 'vue';
+import { computed, reactive, watch } from 'vue';
 import Message from './Message.vue';
 import CampaignMessage from './CampaignMessage.vue';
+import ConversationSeparator from './ConversationSeparator.vue';
+import { addConversationSeparators } from 'dashboard/helper/conversationHistoryHelper';
 import { MESSAGE_TYPES } from './constants.js';
 import { useCamelCase } from 'dashboard/composables/useTransformKeys';
 import { useMapGetter } from 'dashboard/composables/store.js';
@@ -42,6 +44,7 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  aggregatedHistory: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['retry']);
@@ -64,20 +67,27 @@ const timeline = computed(() => {
     createdAt: message.createdAt,
     message,
   }));
-  if (!props.campaignHistory.length) return messages;
-
-  return [
+  const entries = [
     ...messages,
     ...props.campaignHistory.map(recipient => ({
       key: `campaign-${recipient.id}`,
       createdAt: recipient.sent_at,
       recipient,
     })),
-  ].sort((a, b) => a.createdAt - b.createdAt);
+  ].sort(
+    (a, b) =>
+      (a.message?.chronologicalCreatedAt ?? a.createdAt) -
+        (b.message?.chronologicalCreatedAt ?? b.createdAt) ||
+      (a.message?.id ?? 0) - (b.message?.id ?? 0)
+  );
+  return props.aggregatedHistory ? addConversationSeparators(entries) : entries;
 });
 
 // Cache for fetched reply messages to avoid duplicate API calls
 const fetchedReplyMessages = reactive(new Map());
+watch([() => currentChat.value?.id, () => MessageApi.url], () =>
+  fetchedReplyMessages.clear()
+);
 
 /**
  * Fetches a specific message from the API by trying to get messages around it
@@ -86,19 +96,22 @@ const fetchedReplyMessages = reactive(new Map());
  * @returns {Promise<Object|null>} - The fetched message or null if not found/error
  */
 const fetchReplyMessage = async (messageId, conversationId) => {
+  const accountUrl = MessageApi.url;
+  const selectedChatId = currentChat.value?.id;
   // Return cached result if already fetched
   if (fetchedReplyMessages.has(messageId)) {
     return fetchedReplyMessages.get(messageId);
   }
 
   try {
-    const response = await MessageApi.getPreviousMessages({
-      conversationId,
-      before: messageId + 100,
-      after: messageId - 100,
-    });
+    const response = await MessageApi.context(conversationId, messageId);
+    if (
+      accountUrl !== MessageApi.url ||
+      selectedChatId !== currentChat.value?.id
+    )
+      return null;
 
-    const messages = response.data?.payload || [];
+    const messages = response.data?.payload?.messages || [];
     const targetMessage = messages.find(msg => msg.id === messageId);
 
     if (targetMessage) {
@@ -123,7 +136,12 @@ const fetchReplyMessage = async (messageId, conversationId) => {
  * @returns {Boolean} - Whether the message should be grouped with next
  */
 const shouldGroupWithNext = (current, next) => {
-  if (!next || next.status === 'failed') return false;
+  if (
+    !next ||
+    next.status === 'failed' ||
+    current.conversationId !== next.conversationId
+  )
+    return false;
 
   const nextSenderId = next.senderId ?? next.sender?.id;
   const currentSenderId = current.senderId ?? current.sender?.id;
@@ -175,7 +193,11 @@ const getInReplyToMessage = parentMessage => {
 
   // If still not found and we have conversation context, fetch it
   if (!replyMessage && currentChat.value?.id) {
-    fetchReplyMessage(inReplyToMessageId, currentChat.value.id);
+    fetchReplyMessage(
+      inReplyToMessageId,
+      parentMessage.contentAttributes?.inReplyToConversationId ??
+        parentMessage.conversationId
+    );
     return null; // Let UI handle loading state
   }
 
@@ -192,10 +214,15 @@ const getInReplyToMessage = parentMessage => {
         name="unreadBadge"
       />
       <CampaignMessage v-if="entry.recipient" :recipient="entry.recipient" />
+      <ConversationSeparator
+        v-else-if="entry.separator"
+        :message="entry.separator"
+      />
       <Message
         v-else
         v-bind="entry.message"
         :is-email-inbox="isAnEmailChannel"
+        :is-historical="entry.message.conversationId !== currentChat.id"
         :in-reply-to="getInReplyToMessage(entry.message)"
         :group-with-next="
           shouldGroupWithNext(entry.message, timeline[index + 1]?.message)

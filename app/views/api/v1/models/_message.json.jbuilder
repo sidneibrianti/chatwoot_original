@@ -8,6 +8,8 @@ json.content_type message.content_type
 json.status message.status
 json.content_attributes message.content_attributes
 json.created_at message.created_at.to_i
+json.chronological_created_at message.created_at.to_f
+json.chronological_updated_at message.updated_at.to_f
 json.private message.private
 json.source_id message.source_id
 json.sender message.sender.push_event_data if message.sender

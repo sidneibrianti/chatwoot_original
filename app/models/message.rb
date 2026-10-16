@@ -148,6 +148,8 @@ class Message < ApplicationRecord
   def push_event_data
     data = attributes.symbolize_keys.merge(
       created_at: created_at.to_i,
+      chronological_created_at: created_at.to_f,
+      chronological_updated_at: updated_at.to_f,
       message_type: message_type_before_type_cast,
       conversation_id: conversation&.display_id,
       conversation: conversation.present? ? conversation_push_event_data : nil

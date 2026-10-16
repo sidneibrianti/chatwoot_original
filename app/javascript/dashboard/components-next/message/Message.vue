@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, computed, ref, toRefs } from 'vue';
+import { onMounted, computed, ref, toRefs, watch } from 'vue';
 import { useTimeoutFn } from '@vueuse/core';
 import { provideMessageContext } from './provider.js';
 import { useTrack } from 'dashboard/composables';
@@ -134,6 +134,7 @@ const props = defineProps({
   inboxSupportsReplyTo: { type: Object, default: () => ({}) },
   inReplyTo: { type: Object, default: null }, // eslint-disable-line vue/no-unused-properties
   isEmailInbox: { type: Boolean, default: false },
+  isHistorical: { type: Boolean, default: false },
   private: { type: Boolean, default: false },
   additionalAttributes: { type: Object, default: () => ({}) }, // eslint-disable-line vue/no-unused-properties
   sender: { type: Object, default: null },
@@ -404,6 +405,7 @@ const contextMenuEnabledOptions = computed(() => {
     props.status === MESSAGE_STATUS.PROGRESS;
 
   return {
+    openConversation: props.isHistorical,
     copy: hasText,
     delete:
       (hasText || hasAttachments) &&
@@ -413,6 +415,7 @@ const contextMenuEnabledOptions = computed(() => {
     copyLink: !isFailedOrProcessing,
     translate: !isFailedOrProcessing && !isMessageDeleted.value && hasText,
     replyTo:
+      !props.isHistorical &&
       !props.private &&
       props.inboxSupportsReplyTo.outgoing &&
       !isFailedOrProcessing,
@@ -551,6 +554,7 @@ const setupHighlightTimer = () => {
 };
 
 onMounted(setupHighlightTimer);
+watch(() => route.query.messageId, setupHighlightTimer);
 
 provideMessageContext({
   ...toRefs(props),

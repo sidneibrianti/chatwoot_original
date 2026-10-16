@@ -3,6 +3,7 @@ class Api::V1::Accounts::Conversations::MessagesController < Api::V1::Accounts::
 
   def index
     @messages = message_finder.perform
+    @message_pagination = message_finder.pagination
   end
 
   def create
@@ -63,7 +64,16 @@ class Api::V1::Accounts::Conversations::MessagesController < Api::V1::Accounts::
   end
 
   def message_finder
-    @message_finder ||= MessageFinder.new(@conversation, params)
+    @message_finder ||= MessageFinder.new(@conversation, params, authorized_conversations: history_conversations)
+  end
+
+  def history_conversations
+    return unless Current.account.feature_enabled?('conversation_history')
+
+    include_history = Conversations::MessageHistoryParams.new(params).boolean(:include_contact_conversations, default: false)
+    @aggregated_history = include_history && !@conversation.inbox.email?
+    Conversations::HistoryScope.new(conversation: @conversation, user_context: pundit_user)
+                               .resolve(same_inbox: true, include_contact_conversations: @aggregated_history)
   end
 
   def claim_message_retry

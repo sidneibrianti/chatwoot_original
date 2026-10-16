@@ -119,12 +119,38 @@ class MessageApi extends ApiClient {
     );
   }
 
-  getPreviousMessages({ conversationId, after, before }) {
+  getPreviousMessages({
+    conversationId,
+    after,
+    before,
+    includeContactConversations,
+    signal,
+  }) {
     const params = { before };
+    if (includeContactConversations !== undefined) {
+      params.include_contact_conversations = includeContactConversations;
+    }
     if (after && Number(after) !== Number(before)) {
       params.after = after;
     }
-    return axios.get(`${this.url}/${conversationId}/messages`, { params });
+    return axios.get(`${this.url}/${conversationId}/messages`, {
+      params,
+      signal,
+    });
+  }
+
+  search(conversationId, params, { signal } = {}) {
+    return axios.get(`${this.url}/${conversationId}/message_search`, {
+      params,
+      signal,
+    });
+  }
+
+  context(conversationId, messageId, { signal } = {}) {
+    return axios.get(
+      `${this.url}/${conversationId}/message_context/${messageId}`,
+      { signal }
+    );
   }
 
   translateMessage(conversationId, messageId, targetLanguage) {

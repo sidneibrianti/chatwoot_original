@@ -4,10 +4,11 @@ import ButtonGroup from 'dashboard/components-next/buttonGroup/ButtonGroup.vue';
 import { useUISettings } from 'dashboard/composables/useUISettings';
 import { computed } from 'vue';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
-import { useMapGetter } from 'dashboard/composables/store';
+import { useMapGetter, useStore } from 'dashboard/composables/store';
 import { useKeyboardEvents } from 'dashboard/composables/useKeyboardEvents';
 
 const { updateUISettings } = useUISettings();
+const store = useStore();
 
 const currentAccountId = useMapGetter('getCurrentAccountId');
 const isFeatureEnabledonAccount = useMapGetter(
@@ -27,6 +28,7 @@ const isCopilotPanelOpen = computed(
 );
 
 const handleConversationSidebarToggle = () => {
+  store.commit('conversationMessageSearch/close');
   updateUISettings({
     is_contact_sidebar_open: !isContactSidebarOpen.value,
     is_copilot_panel_open: false,
@@ -34,6 +36,7 @@ const handleConversationSidebarToggle = () => {
 };
 
 const handleCopilotSidebarToggle = () => {
+  store.commit('conversationMessageSearch/close');
   updateUISettings({
     is_contact_sidebar_open: false,
     is_copilot_panel_open: !isCopilotPanelOpen.value,

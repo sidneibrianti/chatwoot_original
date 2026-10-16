@@ -5,6 +5,8 @@ json.meta do
   json.assignee @conversation.assignee.push_event_data if @conversation.assignee.present?
   json.agent_last_seen_at @conversation.agent_last_seen_at
   json.assignee_last_seen_at @conversation.assignee_last_seen_at
+  json.pagination @message_pagination if @message_pagination
+  json.aggregated_history !!@aggregated_history
 end
 
 json.payload do

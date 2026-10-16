@@ -16,6 +16,10 @@ import { useInbox } from 'dashboard/composables/useInbox';
 import { useAlert } from 'dashboard/composables';
 import { useI18n } from 'vue-i18n';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
+import Button from 'dashboard/components-next/button/Button.vue';
+import { useAccount } from 'dashboard/composables/useAccount';
+import { FEATURE_FLAGS } from 'dashboard/featureFlags';
+import { useUISettings } from 'dashboard/composables/useUISettings';
 
 const props = defineProps({
   chat: {
@@ -31,6 +35,11 @@ const props = defineProps({
 const { t } = useI18n();
 const store = useStore();
 const route = useRoute();
+const { isCloudFeatureEnabled } = useAccount();
+const { updateUISettings } = useUISettings();
+const historyEnabled = computed(() =>
+  isCloudFeatureEnabled(FEATURE_FLAGS.CONVERSATION_HISTORY)
+);
 const conversationHeader = ref(null);
 const { width } = useElementSize(conversationHeader);
 const { isAWebWidgetInbox, isAnEmailChannel } = useInbox();
@@ -109,6 +118,16 @@ const copyConversationId = async () => {
   } catch (error) {
     // error
   }
+};
+
+const toggleMessageSearch = () => {
+  if (!store.state.conversationMessageSearch.isOpen) {
+    updateUISettings({
+      is_contact_sidebar_open: false,
+      is_copilot_panel_open: false,
+    });
+  }
+  store.commit('conversationMessageSearch/toggle');
 };
 </script>
 
@@ -189,6 +208,16 @@ const copyConversationId = async () => {
         class="hidden md:flex"
       />
       <ConversationCallButton :inbox="inbox" :chat="currentChat" />
+      <Button
+        v-if="historyEnabled"
+        ghost
+        slate
+        sm
+        icon="i-lucide-search"
+        :aria-label="$t('CONVERSATION.SEARCH.TITLE')"
+        :title="$t('CONVERSATION.SEARCH.TITLE')"
+        @click="toggleMessageSearch"
+      />
       <MoreActions :conversation-id="currentChat.id" />
     </div>
   </div>

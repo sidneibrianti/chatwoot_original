@@ -174,13 +174,23 @@ export default {
           return;
         }
         const { messageId } = this.$route.query;
+        const accountId = this.$route.params.accountId;
         this.$store
           .dispatch('setActiveChat', {
             data: selectedConversation,
             after: messageId,
           })
           .then(() => {
-            emitter.emit(BUS_EVENTS.SCROLL_TO_MESSAGE, { messageId });
+            if (
+              this.currentChat.id !== selectedConversation.id ||
+              this.$route.params.accountId !== accountId ||
+              this.$route.query.messageId !== messageId
+            )
+              return;
+            emitter.emit(BUS_EVENTS.SCROLL_TO_MESSAGE, {
+              messageId,
+              forceLoad: true,
+            });
           });
       } else {
         this.$store.dispatch('clearSelectedState');

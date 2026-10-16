@@ -1,5 +1,6 @@
 <script>
 import { useAlert } from 'dashboard/composables';
+import { useMessageNavigation } from 'dashboard/composables/useMessageNavigation';
 import { mapGetters } from 'vuex';
 import { useMessageFormatter } from 'shared/composables/useMessageFormatter';
 import ContextMenu from 'dashboard/components/ui/ContextMenu.vue';
@@ -53,6 +54,7 @@ export default {
 
     return {
       getPlainText,
+      ...useMessageNavigation(),
     };
   },
   data() {
@@ -212,6 +214,18 @@ export default {
       @close="handleClose"
     >
       <div class="menu-container">
+        <MenuItem
+          v-if="enabledOptions['openConversation']"
+          :option="{
+            icon: 'open',
+            label: $t('CONVERSATION.HISTORY.OPEN_CONVERSATION'),
+          }"
+          variant="icon"
+          @click.stop="
+            openMessage(message);
+            handleClose();
+          "
+        />
         <MenuItem
           v-if="enabledOptions['forwardEmail']"
           :option="{

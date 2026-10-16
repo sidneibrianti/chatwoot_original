@@ -23,6 +23,7 @@ import conversationMetadata from './modules/conversationMetadata';
 import conversationPage from './modules/conversationPage';
 import conversations from './modules/conversations';
 import conversationSearch from './modules/conversationSearch';
+import conversationMessageSearch from './modules/conversationMessageSearch';
 import conversationStats from './modules/conversationStats';
 import conversationTypingStatus from './modules/conversationTypingStatus';
 import conversationUnreadCounts from './modules/conversationUnreadCounts';
@@ -90,6 +91,7 @@ export default createStore({
     conversationPage,
     conversations,
     conversationSearch,
+    conversationMessageSearch,
     conversationStats,
     conversationTypingStatus,
     conversationUnreadCounts,

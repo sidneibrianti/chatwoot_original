@@ -1,7 +1,11 @@
 import types from '../../mutation-types';
 import getters, { getSelectedChatConversation } from './getters';
 import actions from './actions';
-import { findPendingMessageIndex } from './helpers';
+import {
+  compareMessages,
+  findPendingMessageIndex,
+  mergeMessages,
+} from './helpers';
 import { MESSAGE_STATUS } from 'shared/constants/messages';
 import wootConstants from 'dashboard/constants/globals';
 import { BUS_EVENTS } from '../../../../shared/constants/busEvents';
@@ -38,6 +42,10 @@ const preserveConversationMessageState = (
   allMessagesLoaded: existingConversation.allMessagesLoaded,
   messages: existingConversation.messages,
   dataFetched: existingConversation.dataFetched,
+  aggregatedHistory: existingConversation.aggregatedHistory,
+  contextMode: existingConversation.contextMode,
+  hasMoreMessagesAfter: existingConversation.hasMoreMessagesAfter,
+  messageWindowVersion: existingConversation.messageWindowVersion,
 });
 
 // mutations
@@ -109,16 +117,27 @@ export const mutations = {
   },
 
   [types.SET_PREVIOUS_CONVERSATIONS](_state, { id, data }) {
-    if (data.length) {
-      const [chat] = _state.allConversations.filter(c => c.id === id);
-      const messageIds = new Set(chat.messages.map(message => message.id));
-      const newMessages = data.filter(message => {
-        if (messageIds.has(message.id)) return false;
-        messageIds.add(message.id);
-        return true;
-      });
-      chat.messages.unshift(...newMessages);
-    }
+    const chat = getConversationById(_state)(id);
+    if (chat && data.length) chat.messages = mergeMessages(data, chat.messages);
+  },
+  invalidateMessageRequests(_state, conversationId) {
+    const chat = getConversationById(_state)(conversationId);
+    if (chat) chat.messageWindowVersion = (chat.messageWindowVersion ?? 0) + 1;
+  },
+  setMessageHistoryState(_state, { id, ...data }) {
+    const chat = getConversationById(_state)(id);
+    if (chat) Object.assign(chat, data);
+  },
+  setMessageWindow(_state, { id, data, keepNewer = false }) {
+    const chat = getConversationById(_state)(id);
+    if (!chat) return;
+    const ids = new Set(data.map(message => message.id));
+    const retained = chat.messages.filter(
+      message =>
+        ids.has(message.id) ||
+        (keepNewer && (!data[0] || compareMessages(message, data[0]) >= 0))
+    );
+    chat.messages = mergeMessages(retained, data);
   },
   [types.SET_ALL_ATTACHMENTS](_state, { id, data }) {
     _state.attachments[id] = [...data];
@@ -243,6 +262,25 @@ export const mutations = {
   },
 
   [types.ADD_MESSAGE]({ allConversations, selectedChatId }, message) {
+    // A loaded historical message can appear in several timelines. Updating it
+    // must not change their unread counts, recipient or last activity.
+    allConversations.forEach(conversation => {
+      if (conversation.id === message.conversation_id) return;
+      const index = conversation.messages?.findIndex(m => m.id === message.id);
+      if (index >= 0) {
+        conversation.messages[index] = {
+          ...conversation.messages[index],
+          ...message,
+        };
+      } else if (
+        conversation.aggregatedHistory &&
+        conversation.messages?.some(
+          m => m.conversation_id === message.conversation_id
+        )
+      ) {
+        conversation.messages = mergeMessages(conversation.messages, [message]);
+      }
+    });
     const { conversation_id: conversationId } = message;
     const [chat] = getSelectedChatConversation({
       allConversations,
@@ -254,7 +292,12 @@ export const mutations = {
     if (pendingMessageIndex !== -1) {
       chat.messages[pendingMessageIndex] = message;
     } else {
-      chat.messages.push(message);
+      if (!chat.contextMode || !chat.hasMoreMessagesAfter) {
+        chat.messages.push(message);
+        if (chat.aggregatedHistory || chat.contextMode) {
+          chat.messages = mergeMessages([], chat.messages);
+        }
+      }
       chat.timestamp = message.created_at;
       const { conversation: { unread_count: unreadCount = 0 } = {} } = message;
       chat.unread_count = unreadCount;

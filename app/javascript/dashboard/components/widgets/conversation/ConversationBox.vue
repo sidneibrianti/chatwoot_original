@@ -4,6 +4,8 @@ import ConversationHeader from './ConversationHeader.vue';
 import DashboardAppFrame from '../DashboardApp/Frame.vue';
 import EmptyState from './EmptyState/EmptyState.vue';
 import MessagesView from './MessagesView.vue';
+import MessageSearchPanel from './MessageSearchPanel.vue';
+import { FEATURE_FLAGS } from 'dashboard/featureFlags';
 
 export default {
   components: {
@@ -11,6 +13,7 @@ export default {
     DashboardAppFrame,
     EmptyState,
     MessagesView,
+    MessageSearchPanel,
   },
   props: {
     inboxId: {
@@ -38,6 +41,7 @@ export default {
     ...mapGetters({
       currentChat: 'getSelectedChat',
       dashboardApps: 'dashboardApps/getRecords',
+      currentAccountId: 'getCurrentAccountId',
     }),
     dashboardAppTabs() {
       return [
@@ -56,8 +60,18 @@ export default {
     showContactPanel() {
       return this.isContactPanelOpen && this.currentChat.id;
     },
+    historyEnabled() {
+      return this.$store.getters['accounts/isFeatureEnabledonAccount'](
+        this.currentAccountId,
+        FEATURE_FLAGS.CONVERSATION_HISTORY
+      );
+    },
   },
   watch: {
+    currentAccountId() {
+      this.$store.commit('conversationMessageSearch/close');
+      this.$store.dispatch('conversationMessageSearch/reset');
+    },
     'currentChat.inbox_id': {
       immediate: true,
       handler() {
@@ -123,15 +137,25 @@ export default {
       />
     </woot-tabs>
     <div v-show="!activeIndex" class="flex h-full min-h-0 m-0">
-      <MessagesView
-        v-if="currentChat.id"
-        :inbox-id="inboxId"
-        :is-inbox-view="isInboxView"
-      />
-      <EmptyState
-        v-if="!currentChat.id && !isInboxView"
-        :is-on-expanded-layout="isOnExpandedLayout"
-      />
+      <div class="flex flex-col lg:flex-row flex-1 min-w-0 min-h-0">
+        <MessagesView
+          v-if="currentChat.id"
+          :inbox-id="inboxId"
+          :is-inbox-view="isInboxView"
+        />
+        <EmptyState
+          v-if="!currentChat.id && !isInboxView"
+          :is-on-expanded-layout="isOnExpandedLayout"
+        />
+        <MessageSearchPanel
+          v-if="
+            currentChat.id &&
+            historyEnabled &&
+            $store.state.conversationMessageSearch.isOpen
+          "
+          class="order-first lg:order-last"
+        />
+      </div>
       <slot />
     </div>
     <DashboardAppFrame
